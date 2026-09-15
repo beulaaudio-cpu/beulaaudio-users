@@ -1,0 +1,456 @@
+================================================================================
+BEULA AUDIO — COMPLETE SYSTEM SPECIFICATION & ADMIN ARCHITECTURE
+================================================================================
+Last Updated: 2026-09-09 (Review system hardened, Firestore rules v2)
+Company: Beula Audio (Premier Stage Sound, Concert Production & DJ Audio Rentals)
+Coverage: Tamil Nadu, India
+Brand Metrics: 9+ Years Experience, 1500+ Events Powered, 100% Reliability
+Contact Phone: +91 89395 30757
+Contact Email: beulaaudio@gmail.com
+Instagram: @beula_audio_dj_instruments (https://www.instagram.com/beula_audio_dj_instruments/)
+
+================================================================================
+1. FIREBASE & CLOUD INFRASTRUCTURE CONFIGURATION
+================================================================================
+- Project ID: beulaaudi0
+- Auth Domain: beulaaudi0.firebaseapp.com
+- Storage Bucket: beulaaudi0.firebasestorage.app
+- Messaging Sender ID: 431295679857
+- App ID: 1:431295679857:web:fbb88e4071dd1d4c5cbad0
+- Measurement ID: G-F8CKE9JX5Y
+- Database: Cloud Firestore (Default instance)
+- Firestore Region: asia-south2 (Delhi)
+- Primary Admin Identity: beulaaudio@gmail.com
+
+================================================================================
+2. CLIENT APPLICATION ARCHITECTURE & USER FLOW
+================================================================================
+Frontend Framework: Next.js 16 (App Router, Turbopack)
+Styling: Pure Pitch Black Theme (#000000, #050508) + Amber Accent (#FBBF24) + Glass Cards
+3D Engine: Three.js WebGL with optimized Draco-compressed GLB model (/3dmodel/beula-audio-dj-instrument-bg.glb)
+Internationalization: Bilingual Tamil (தமிழ்) & English support with instant toggle and local storage persistence.
+
+User Interaction Flow:
+1. Public Browsing (No Login Required):
+   - 3D Interactive Stage hero with right-biased positioning and subtle mouse parallax.
+   - What We Offer section (DJ Setups, Live Band, Custom Sound Configurator).
+   - Dynamic 3D Fanned Package Showcase with card deck perspective (loaded live from Firestore `packages`).
+   - Equipment details modal with high-fidelity itemized breakdown.
+   - Dynamic Client Reviews Section with "Add Review" button and real-time live review cards.
+   - Dedicated Tracking portal (/track) for real-time dispatch progress.
+
+2. Booking & Authentication Flow (Login Required to Order):
+   - Customers can explore packages freely.
+   - Clicking "Reserve" or "Customize" triggers Google Sign-In / Email authentication if unauthenticated.
+   - 5-Step Booking Drawer:
+     * Step 1: Package / Custom equipment configuration
+     * Step 2: Customer contact details (Full Name, 10-digit Indian phone regex validation)
+     * Step 3: Event details (Date, Timing slot, Event type: Marriage/Birthday/Ear Piercing/Corporate/Others with custom name, Tamil Nadu District & Address)
+     * Step 4: Summary & Price Review (Transportation disclaimer included)
+     * Step 5: Submission with unique Booking Reference (BK-XXXXXX) & Idempotency Token (REQ-XXXXXX)
+   - Real-time client-side direct persistence to Firestore `bookings` collection.
+
+3. Client Reviews Flow (User Generated, Admin Controlled):
+   - Users click "ADD REVIEW" on the website.
+   - Modal lets user select 1-5 Star rating, enter their Name, Event Type, District, and comment.
+   - Submitted review saves directly to Firestore `reviews` collection (approved = true by default) and instantly renders on the page.
+   - Zero hardcoded fake reviews created by the system.
+   - Admin has full authority in the Admin Control Panel to moderate, edit, create, or delete reviews.
+
+4. Tracking & Order Status Portal (/track):
+   - Direct lookup by Booking Reference ID (BK-XXXXXX or REQ-XXXXXX).
+   - Logged-in user booking history table.
+   - Real-time 5-Stage Dispatch Stepper:
+     1. Ordered (Reservation received)
+     2. Package Accepted (Stage logistics verified by admin)
+     3. Shipped / In Transit (Dispatch crew en route to venue)
+     4. On Live (Stage audio & lighting live & operational)
+     5. Completed (Concert concluded successfully)
+
+================================================================================
+3. FIRESTORE DATABASE COLLECTIONS & SCHEMA CONTRACT
+================================================================================
+
+--------------------------------------------------------------------------------
+Collection A: `packages` (Concert Tiers & Catalog)
+--------------------------------------------------------------------------------
+Stores all concert packages dynamically displayed on the website.
+Document ID: packageId (e.g., "dj-essential", "dj-premium", "dj-honeycomb", "dj-honeycomb-plus", "dj-honeycomb-pro", "instrument-setup")
+
+Fields:
+- id: string (Unique identifier)
+- name: string (e.g., "Premium Setup", "Honey Comb Plus(+)")
+- category: "dj" | "instrument" | "custom"
+- basePrice: number | null (e.g., 8000, 12000, 15000, 20000; null for custom/contact quote)
+- priceLabel: string (e.g., "₹12,000")
+- description: string (Detailed setup description)
+- tagline: string (Marketing headline)
+- transportIncluded: boolean (Always false)
+- published: boolean (true = visible on site, false = hidden/draft)
+- order: number (1, 2, 3, 4, 5 for ordering on frontend)
+- featured: boolean (optional popular badge)
+- items: Array of:
+  * name: string (e.g., "VRX Top speaker", "Sharpy Light", "Parcan Lights")
+  * quantity: number (e.g., 2, 8, 12)
+  * unit: "unit" | "pair" | "set" | "package"
+  * inventoryKey: string (e.g., "vrxTop", "sharpy", "parcan", "bassSpeaker")
+  * notes?: string
+- danceFloorOptions?: Array of:
+  * id: string
+  * label: string
+  * size: "12x12" | "16x16"
+  * price: number (e.g., 7000, 10000)
+
+--------------------------------------------------------------------------------
+Collection B: `inventory` (Physical Equipment Warehouse)
+--------------------------------------------------------------------------------
+Tracks physical equipment owned by Beula Audio to manage capacity and prevent double-booking.
+Document ID: "current"
+
+Fields:
+- vrxTop: number (Total count, default: 8)
+- bassSpeaker: number (Total 18" + standard subwoofers, default: 12)
+- topSpeaker: number (Standard mid-tops, default: 8)
+- sharpy: number (Sharpy moving beam lights, default: 8)
+- parcan: number (Parcan wash lights, default: 50)
+- honeyComb: number (Honeycomb geometric rigs, default: 2)
+- blinder: number (Stage blinder lights, default: 10)
+- moving: number (Moving head spotlights, default: 1)
+- spyder: number (Spyder multi-beam lights, default: 4)
+- dandiya: number (Dandiya light bars, default: 2)
+- monitor: number (Stage monitors / QSC K12, default: 8)
+- mic: number (Vocal mics & stands, default: 30)
+- djMaskWhiteBlack: number (DJ front black/white masks, default: 2)
+- djLedMask: number (DJ illuminated LED masks, default: 2)
+- truss: { widthFeet: number, lengthFeet: number, count: number } (e.g., 20x60ft Hydraulic stand)
+- boxTruss: { widthFeet: number, lengthFeet: number, count: number } (e.g., 40x60ft Box truss)
+- effectLights: { dandiya: number, lazer: number, movingLight: number, discoBall: number, spyderLight: number }
+- customItemsCatalog: Array of { id: string, name: string, unitPrice: number, unit: string, stock: number, category: string }
+- updatedAt: string (ISO 8601 timestamp)
+
+--------------------------------------------------------------------------------
+Collection C: `inventory_items` (Custom Configurator Equipment)
+--------------------------------------------------------------------------------
+Individual equipment documents that users can select in the Build Your Own Setup tab.
+Document ID: itemId (e.g., "vrx-top", "bass-18", "sharpy-beam", "smoke-machine")
+Fields:
+- id: string
+- name: string
+- category: "speakers" | "lighting" | "atmosphere" | "dj_gear" | "structural"
+- unitPrice: number (Price per unit in INR)
+- stock: number (Total owned count)
+- minQty: number
+- maxQty: number
+- requiresBassDependency?: boolean (e.g., VRX Top requires 18" Bass)
+- enabled: boolean
+
+--------------------------------------------------------------------------------
+Collection D: `bookings` (Customer Orders & Admin Dispatch)
+--------------------------------------------------------------------------------
+Document ID: bookingId (e.g., "BK-VDJGV45")
+Fields:
+- id: string ("BK-XXXXXX")
+- trackingId: string ("BK-XXXXXX")
+- requestId: string ("REQ-XXXXXX" idempotency token)
+- userId: string (Customer Firebase Auth UID)
+- userEmail: string (Customer Google Email)
+- source: "website" | "admin" (Admin offline bookings vs online web orders)
+- status: "pending" | "confirmed" | "cancelled" | "completed" | "rejected"
+- stageStatus: "ordered" | "accepted" | "declined" | "shipped" | "on_live" | "completed"
+- createdAt: string (ISO timestamp)
+- updatedAt: string (ISO timestamp)
+- customer:
+  * name: string
+  * phone: string (10 digits)
+- event:
+  * type: "marriage" | "birthday" | "ear_piercing" | "corporate" | "others"
+  * customType?: string (if type is "others")
+  * date: string ("YYYY-MM-DD")
+  * startTime?: string
+  * endTime?: string
+  * timing?: string ("MORNING: 06:00 - 12:00", "EVENING: 16:00 - 23:00")
+  * district: string (e.g., "Chennai", "Coimbatore", "Madurai", "Tirunelveli")
+  * address: string (Full venue address)
+- setup:
+  * category: "dj" | "instrument" | "custom"
+  * packageId?: string
+  * packageName?: string
+  * customItems?: Array<{ itemId: string, name: string, quantity: number, unitPrice: number }>
+  * effectLights?: Array<{ itemId: string, name: string, quantity: number }>
+  * danceFloor?: { id: string, size: string, price: number }
+  * basePrice: number | null
+  * customPrice: number
+  * danceFloorPrice: number
+  * transportCharge: number | null (Added by admin after calculating distance)
+- totalPriceBeforeTransport: number | null
+- isCustomQuote: boolean
+- notes?: string
+- cancellationReason?: string
+
+--------------------------------------------------------------------------------
+Collection E: `reviews` (Client Reviews & Admin Moderation)
+--------------------------------------------------------------------------------
+Document ID: reviewId (e.g., "REV-K89DF2A")
+Fields:
+- id: string
+- userId?: string (Google UID)
+- userName: string (Customer Name)
+- userEmail?: string
+- rating: number (1 to 5)
+- comment: string (Feedback text, 5–2000 characters)
+- eventTypeName?: string (e.g., "Wedding Reception", "DJ Party") — optional, omitted if blank
+- district?: string (e.g., "Madurai", "Chennai") — optional, omitted if blank
+- approved: boolean (true = displayed on site by default; admin can set false to hide)
+- createdAt: string (ISO timestamp — set server-side)
+- updatedAt?: string (ISO timestamp)
+
+Security Rules Summary (Collection E — reviews):
+- Public GET: anyone can read individual approved reviews
+- Public LIST: only approved reviews visible to public; admin sees all
+- CREATE: authenticated user only; comment <= 2000 chars, rating 1–5;
+  userId must match request.auth.uid if provided; approved MUST be true (can't self-reject)
+- UPDATE: admin (full control including toggling approved); own-user can edit own
+  comment/rating but CANNOT change the approved field or userId
+- DELETE: admin (any); own-user can retract their own review
+
+Admin Functions (lib/firestore/reviews.ts):
+- subscribeApprovedReviews(cb)  — real-time listener for site display (approved=true)
+- submitReview(review)          — user-facing; strips undefined fields; sets approved=true
+- adminGetAllReviews()          — fetch all reviews including unapproved for moderation
+- adminUpdateReview(id, updates)— merge-update any field including approved
+- adminDeleteReview(id)         — hard-delete a review document
+
+--------------------------------------------------------------------------------
+Collection F: `settings` (Site-Wide Global Control)
+--------------------------------------------------------------------------------
+Document ID: "site"
+Fields:
+- contactPhone: string (e.g., "+91 89395 30757")
+- contactEmail: string (e.g., "beulaaudio@gmail.com")
+- instagramHandle: string (e.g., "beula_audio_dj_instruments")
+- instagramUrl: string
+- statYears: string (e.g., "9+")
+- statEvents: string (e.g., "1,500+")
+- statReliability: string (e.g., "100%")
+- transportDisclaimer: string
+- updatedAt: string
+
+--------------------------------------------------------------------------------
+Collection G: `bookingAudit` (Strict FIFO Audit History)
+--------------------------------------------------------------------------------
+Document ID: auditId (e.g., "AUD-XXXXXX")
+Fields:
+- id: string
+- bookingId: string
+- action: "created" | "updated" | "cancelled" | "confirmed" | "completed" | "stage_advanced" | "price_adjusted"
+- source: "website" | "admin"
+- actorUid: string
+- actorEmail: string
+- timestamp: string
+- details: map of changes
+
+--------------------------------------------------------------------------------
+Collection H: `admins` (Access Control RBAC)
+--------------------------------------------------------------------------------
+Document ID: uid (Firebase Auth UID)
+Fields:
+- email: string
+- name: string
+- role: "super_admin" | "manager" | "technician"
+- enabled: boolean
+- createdAt: string
+
+================================================================================
+4. COMPLETE FIRESTORE SECURITY RULES
+================================================================================
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'beulaaudio@gmail.com' ||
+        request.auth.token.admin == true ||
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.enabled == true)
+      );
+    }
+
+    function isBookingOwner(resData) {
+      return isAuthenticated() && (
+        resData.userId == request.auth.uid ||
+        resData.customer.phone == request.auth.token.phone_number ||
+        (request.auth.token.email != null && resData.userEmail == request.auth.token.email)
+      );
+    }
+
+    function isValidStatus(status) {
+      return status in ['pending', 'confirmed', 'cancelled', 'completed', 'rejected'];
+    }
+
+    function isValidStageStatus(stage) {
+      return stage in ['ordered', 'accepted', 'declined', 'shipped', 'on_live', 'completed'];
+    }
+
+    function isValidCategory(category) {
+      return category in ['dj', 'instrument', 'custom'];
+    }
+
+    function isValidEventType(type) {
+      return type in ['marriage', 'birthday', 'ear_piercing', 'corporate', 'others'];
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /packages/{packageId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /packages/{packageId}/{subcollection}/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /inventory/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /inventory_items/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow get: if true;
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if 
+        isAdmin() ||
+        (
+          isAuthenticated() &&
+          request.resource.data.source == 'website' &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.requestId is string &&
+          request.resource.data.requestId.size() >= 6 &&
+          request.resource.data.customer.name is string &&
+          request.resource.data.customer.name.size() >= 2 &&
+          request.resource.data.customer.phone is string &&
+          request.resource.data.customer.phone.size() >= 10 &&
+          request.resource.data.event.date is string &&
+          request.resource.data.event.district is string &&
+          request.resource.data.event.address is string &&
+          isValidEventType(request.resource.data.event.type) &&
+          isValidCategory(request.resource.data.setup.category) &&
+          (request.resource.data.totalPriceBeforeTransport == null ||
+           (request.resource.data.totalPriceBeforeTransport is number &&
+            request.resource.data.totalPriceBeforeTransport >= 0))
+        );
+
+      allow update: if 
+        isAdmin() ||
+        (
+          isBookingOwner(resource.data) &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status == 'cancelled' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'cancellationReason'])
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    match /reviews/{reviewId} {
+      // Public: individual gets allowed for all; listing only approved docs for guests
+      allow get: if true;
+      allow list: if isAdmin() || resource.data.approved == true;
+
+      // Users can create with validated fields; userId must match own uid; approved=true enforced
+      allow create: if isAuthenticated() &&
+        request.resource.data.userName is string &&
+        request.resource.data.userName.size() >= 2 &&
+        request.resource.data.comment is string &&
+        request.resource.data.comment.size() >= 5 &&
+        request.resource.data.comment.size() <= 2000 &&
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        (!('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid) &&
+        request.resource.data.approved == true;
+
+      // Admin: full update control; user: can edit own comment/rating but not approved status
+      allow update: if isAdmin() ||
+        (isAuthenticated() &&
+         resource.data.userId == request.auth.uid &&
+         request.resource.data.approved == resource.data.approved &&
+         request.resource.data.userId == resource.data.userId);
+
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    match /bookingAudit/{auditId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    match /inventoryAudit/{auditId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /admins/{uid} {
+      allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /diagnostics/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
+
+================================================================================
+5. ADMIN CONTROL PANEL MODULES & CAPABILITIES
+================================================================================
+
+Module 1: Package & Pricing Catalog Manager
+- Modify base price for any setup (e.g. ₹8,000 -> ₹10,000) with instant sync on user website.
+- Add, edit, or delete equipment items inside any package (e.g., change Parcan count from 8 to 12).
+- Toggle visibility (published = true / false) to hide or feature packages.
+- Create new custom concert package tiers.
+
+Module 2: Warehouse Equipment Inventory Manager
+- Live stock table for all owned sound and lighting hardware.
+- Add new custom equipment items with unit prices into `inventory_items` / `customItemsCatalog`.
+- Date-based concurrency calendar: View booked equipment count vs free inventory for any date.
+
+Module 3: Order Booking & Dispatch Pipeline
+- Real-time stream of incoming customer booking submissions.
+- Step controller to advance 5-stage dispatch pipeline (Ordered -> Accepted -> Shipped -> On Live -> Completed).
+- Add transport delivery fees to customer reservations based on location distance.
+- Offline booking entry form to record phone/walk-in reservations and block equipment.
+
+Module 4: Client Reviews Moderator & Creator
+- View all reviews submitted by clients in real time.
+- Toggle visibility/approval state, edit text/rating, or delete inappropriate reviews.
+- Admin can also post official client testimonials or verified event reviews directly.
+
+Module 5: Global Brand & Content Settings
+- Update contact phone numbers (+91 89395 30757), email, and Instagram links.
+- Update business metrics (9+ years, 1500+ events, 100% reliability).
+- Update transportation disclaimer banner.
+
+Module 6: Security Audit Log
+- Searchable and exportable history of booking actions, status changes, and inventory updates.
+================================================================================

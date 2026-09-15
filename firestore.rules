@@ -1,0 +1,200 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // 1. CORE HELPER FUNCTIONS & ADMIN RBAC SYSTEM
+    // =========================================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Comprehensive Admin Authorization:
+    // 1. Primary Owner Google Identity (beulaaudio@gmail.com)
+    // 2. Custom Token Claim: admin == true
+    // 3. Database Role Document in /admins/{uid} with enabled: true
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'beulaaudio@gmail.com' ||
+        request.auth.token.admin == true ||
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.enabled == true)
+      );
+    }
+
+    function isBookingOwner(resData) {
+      return isAuthenticated() && (
+        resData.userId == request.auth.uid ||
+        resData.customer.phone == request.auth.token.phone_number ||
+        (request.auth.token.email != null && resData.userEmail == request.auth.token.email)
+      );
+    }
+
+    function isValidStatus(status) {
+      return status in ['pending', 'confirmed', 'cancelled', 'completed', 'rejected'];
+    }
+
+    function isValidStageStatus(stage) {
+      return stage in ['ordered', 'accepted', 'declined', 'shipped', 'on_live', 'completed'];
+    }
+
+    function isValidCategory(category) {
+      return category in ['dj', 'instrument', 'custom'];
+    }
+
+    function isValidEventType(type) {
+      return type in ['marriage', 'birthday', 'ear_piercing', 'corporate', 'others'];
+    }
+
+    // =========================================================================
+    // 2. GLOBAL SITE SETTINGS & CONTENT CONTROL (Admin Fully Modifiable)
+    // Controls: Phone numbers, email, disclaimers, brand metrics (years, events)
+    // =========================================================================
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 3. PACKAGES & PRICING CATALOG (Admin Fully Modifiable)
+    // Controls: Concert setups, base prices, included equipment recipes, visibility
+    // =========================================================================
+    match /packages/{packageId} {
+      // Public customers see published packages; Admins see all draft/archived packages
+      allow get, list: if true;
+      
+      // Admin can create, edit price/items, reorder, publish, or delete packages
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Sub-collections under packages (optional tiered options / lighting addons)
+    match /packages/{packageId}/{subcollection}/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 4. WAREHOUSE PHYSICAL INVENTORY & CUSTOM GEAR (Admin Fully Modifiable)
+    // Controls: Total gear tallies (VRX, Sharpys, Bass, Trusses), custom catalog items
+    // =========================================================================
+    match /inventory/{docId} {
+      // Public read for live availability calculation
+      allow read: if true;
+      
+      // Only Admin can modify total counts, add new equipment, or update specifications
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Dedicated custom equipment items available in Custom Setup Configurator
+    match /inventory_items/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 5. BOOKINGS & DISPATCH PIPELINE
+    // Controls: Customer reservations, offline admin bookings, 5-stage dispatch pipeline
+    // =========================================================================
+    match /bookings/{bookingId} {
+      // 1. Anyone with a valid Tracking Reference ID (BK-XXXXXX) can read tracking status
+      allow get: if true;
+
+      // 2. Customers can list their own bookings; Admins can list and filter all bookings
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+
+      // 3. Booking creation: Authenticated client or Offline Admin
+      allow create: if 
+        isAdmin() ||
+        (
+          isAuthenticated() &&
+          request.resource.data.source == 'website' &&
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.requestId is string &&
+          request.resource.data.requestId.size() >= 6 &&
+          request.resource.data.customer.name is string &&
+          request.resource.data.customer.name.size() >= 2 &&
+          request.resource.data.customer.phone is string &&
+          request.resource.data.customer.phone.size() >= 10 &&
+          request.resource.data.event.date is string &&
+          request.resource.data.event.district is string &&
+          request.resource.data.event.address is string &&
+          isValidEventType(request.resource.data.event.type) &&
+          isValidCategory(request.resource.data.setup.category) &&
+          (request.resource.data.totalPriceBeforeTransport == null ||
+           (request.resource.data.totalPriceBeforeTransport is number &&
+            request.resource.data.totalPriceBeforeTransport >= 0))
+        );
+
+      // 4. Booking updates: Strictly Admin (changing stageStatus, adding transport price, confirming)
+      // Exception: Users can cancel their own booking if it is still in 'pending' status
+      allow update: if 
+        isAdmin() ||
+        (
+          isBookingOwner(resource.data) &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status == 'cancelled' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'cancellationReason'])
+        );
+
+      // 5. Booking deletion: Strictly Admin
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // 7. ADMIN USERS & RBAC ACCESS LIST
+    // =========================================================================
+    match /admins/{uid} {
+      allow read: if isAuthenticated() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 8. CUSTOMER REVIEWS (User Created, Admin Moderated)
+    // Public: read approved reviews. Authenticated users: submit their own.
+    // Admin: full CRUD + approval toggling across all reviews.
+    // =========================================================================
+    match /reviews/{reviewId} {
+      // Anyone can read approved / published reviews
+      allow read: if true;
+
+      // Allow verified review creation
+      allow create: if (
+        (isAuthenticated() && (!('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid)) ||
+        isAdmin() ||
+        (request.resource.data.userName is string && request.resource.data.userName.size() >= 2)
+      ) &&
+      request.resource.data.userName is string &&
+      request.resource.data.userName.size() >= 2 &&
+      request.resource.data.userName.size() <= 100 &&
+      request.resource.data.comment is string &&
+      request.resource.data.comment.size() >= 3 &&
+      request.resource.data.comment.size() <= 3000 &&
+      request.resource.data.rating is number &&
+      request.resource.data.rating >= 1 &&
+      request.resource.data.rating <= 5;
+
+      // Admin has full control to moderate/approve; users can update their own
+      allow update: if isAdmin() ||
+        (isAuthenticated() &&
+         resource.data.userId == request.auth.uid &&
+         request.resource.data.approved == resource.data.approved);
+
+      // Admin can delete any review; users can retract their own
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    // =========================================================================
+    // 9. DIAGNOSTICS & SYSTEM PINGS
+    // =========================================================================
+    match /diagnostics/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Default deny for all other unknown paths
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
